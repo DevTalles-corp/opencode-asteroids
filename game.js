@@ -199,6 +199,7 @@ class Ship {
     this.shootCooldown = 0;
     this.dead          = false;
     this.speedBoost    = 0;   // timer del power-up de Velocidad
+    this.shieldTime    = 0;   // timer del escudo
   }
 
   update(dt) {
@@ -206,6 +207,7 @@ class Ship {
     if (this.invincible    > 0) this.invincible    -= dt;
     if (this.shootCooldown > 0) this.shootCooldown -= dt;
     if (this.speedBoost    > 0) this.speedBoost    -= dt;
+    if (this.shieldTime    > 0) this.shieldTime    -= dt;
 
     const ROT   = 3.5;   // rad/s
     const THRUST = (this.speedBoost > 0 ? 520 : 260);  // px/s² (x2 con boost)
@@ -237,6 +239,23 @@ class Ship {
 
   draw() {
     if (this.dead) return;
+
+    // Burbuja de escudo (visible aunque la nave parpadee por invencibilidad)
+    if (this.shieldTime > 0) {
+      const pulse = 1 + Math.sin(performance.now() / 120) * 0.04;
+      const r = SHIELD_RADIUS * pulse;
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.strokeStyle = 'rgba(102,204,255,0.85)';
+      ctx.fillStyle   = 'rgba(102,204,255,0.12)';
+      ctx.lineWidth   = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Parpadeo durante invencibilidad de reaparición
     if (this.invincible > 0 && Math.floor(this.invincible * 8) % 2 === 0) return;
 
@@ -286,10 +305,13 @@ class Ship {
 }
 
 // ── PowerUp (Velocidad) ───────────────────────────────────────────────────────
-const POWERUP_TTL    = 8;     // segundos en pantalla si no se recoge
+const POWERUP_TTL    = 14;    // segundos en pantalla si no se recoge
 const POWERUP_BOOST  = 10;    // duración del boost al recogerlo
 const POWERUP_RADIUS = 12;
-const POWERUP_DROP   = 0.08;  // probabilidad de drop por asteroide destruido
+const POWERUP_DROP   = 0.16;  // probabilidad de drop por asteroide destruido
+
+const SHIELD_DURATION = 6;   // segundos de burbuja de escudo al recogerlo
+const SHIELD_RADIUS   = 22;   // radio visual de la burbuja
 
 class PowerUp {
   constructor(x, y) {
@@ -299,11 +321,12 @@ class PowerUp {
     this.ttl  = POWERUP_TTL;
     this.rot  = 0;
     this.dead = false;
+    this.kind = 'speed';
   }
 
   update(dt) {
-    this.x = wrap(this.x + 40 * dt, W);   // deriva lenta toroidal
-    this.y = wrap(this.y + 40 * dt, H);
+    this.x = wrap(this.x + 20 * dt, W);   // deriva lenta toroidal
+    this.y = wrap(this.y + 20 * dt, H);
     this.rot += 1.5 * dt;
     this.ttl -= dt;
     if (this.ttl <= 0) this.dead = true;
@@ -352,6 +375,66 @@ class PowerUp {
   }
 }
 
+// ── PowerUp (Escudo) ──────────────────────────────────────────────────────────
+class ShieldPowerUp {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.radius = POWERUP_RADIUS;
+    this.ttl  = POWERUP_TTL;
+    this.rot  = 0;
+    this.dead = false;
+    this.kind = 'shield';
+  }
+
+  update(dt) {
+    this.x = wrap(this.x + 20 * dt, W);   // deriva lenta toroidal
+    this.y = wrap(this.y + 20 * dt, H);
+    this.rot += 1.5 * dt;
+    this.ttl -= dt;
+    if (this.ttl <= 0) this.dead = true;
+  }
+
+  draw() {
+    // Parpadeo en los últimos 2s
+    if (this.ttl < 2 && Math.floor(this.ttl * 8) % 2 === 0) return;
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rot);
+    ctx.strokeStyle = '#66ccff';
+    ctx.fillStyle   = 'rgba(102,204,255,0.18)';
+    ctx.lineWidth   = 1.5;
+    ctx.lineJoin    = 'round';
+
+    // Hexágono
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const px = Math.cos(a) * this.radius;
+      const py = Math.sin(a) * this.radius;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Símbolo de escudo (semicírculo + base) sin rotar
+    ctx.rotate(-this.rot);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -7);
+    ctx.arc(0, -1, 6, Math.PI, 0, false);
+    ctx.lineTo(0, -7);
+    ctx.closePath();
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+ctx.restore();
+  }
+}
+
 // ── Partículas (explosión) ────────────────────────────────────────────────────
 class Particle {
   constructor(x, y) {
@@ -389,6 +472,7 @@ let ship, bullets, asteroids, particles, powerUps, shootingStars;
 let score, lives, level;
 let state;      // 'playing' | 'dead' | 'gameover'
 let deadTimer;
+let shieldDroppedThisLevel;
 
 function spawnAsteroids(count) {
   const SAFE_DIST = 130;
@@ -413,6 +497,7 @@ function initGame() {
   lives  = 3;
   level  = 1;
   state  = 'playing';
+  shieldDroppedThisLevel = false;
   spawnAsteroids(4);
 }
 
@@ -422,12 +507,32 @@ function nextLevel() {
   particles = [];
   powerUps  = [];
   shootingStars = [];
+  shieldDroppedThisLevel = false;
   ship.reset();
   spawnAsteroids(3 + level);
 }
 
 function explode(x, y, count = 8) {
   for (let i = 0; i < count; i++) particles.push(new Particle(x, y));
+}
+
+function maybeDropPowerUp(x, y) {
+  // Pity: sin boost ni escudo activos y sin pickups en pantalla → fuerza escudo
+  if (ship.shieldTime <= 0 && ship.speedBoost <= 0 && powerUps.length === 0) {
+    powerUps.push(new ShieldPowerUp(x, y));
+    shieldDroppedThisLevel = true;
+    return;
+  }
+  if (Math.random() >= POWERUP_DROP) return;
+  // Garantía: primer drop del nivel = escudo
+  if (!shieldDroppedThisLevel) {
+    powerUps.push(new ShieldPowerUp(x, y));
+    shieldDroppedThisLevel = true;
+    return;
+  }
+  // Resto: 50/50
+  if (Math.random() < 0.5) powerUps.push(new PowerUp(x, y));
+  else                     powerUps.push(new ShieldPowerUp(x, y));
 }
 
 function killShip() {
@@ -490,7 +595,7 @@ function update(dt) {
         score += POINTS[a.size];
         explode(a.x, a.y, a.size * 5);
         newAsteroids.push(...a.split());
-        if (Math.random() < POWERUP_DROP) powerUps.push(new PowerUp(a.x, a.y));
+        maybeDropPowerUp(a.x, a.y);
       }
     }
   }
@@ -513,30 +618,47 @@ function update(dt) {
 
   // Nave vs power-up
   for (const p of powerUps) {
-    if (!p.dead && dist(ship, p) < ship.radius + p.radius) {
+    if (!p.dead && !ship.dead && dist(ship, p) < ship.radius + p.radius) {
       p.dead = true;
-      ship.speedBoost = POWERUP_BOOST;   // refresca a 5s siempre
+      if (p.kind === 'shield') ship.shieldTime = SHIELD_DURATION;
+      else                     ship.speedBoost = POWERUP_BOOST;
     }
   }
 
   // Nave vs asteroide
   if (!ship.dead && ship.invincible <= 0) {
     for (const a of asteroids) {
-      if (dist(ship, a) < ship.radius + a.radius * 0.82) {
-        killShip();
+      if (!a.dead && dist(ship, a) < ship.radius + a.radius * 0.82) {
+        if (ship.shieldTime > 0) {
+          a.dead = true;
+          score += POINTS[a.size];
+          explode(a.x, a.y, a.size * 5);
+          maybeDropPowerUp(a.x, a.y);
+          asteroids.push(...a.split());
+        } else {
+          killShip();
+        }
         break;
       }
     }
+    asteroids = asteroids.filter(a => !a.dead);
   }
 
   // Nave vs estrella fugaz
   if (!ship.dead && ship.invincible <= 0) {
     for (const s of shootingStars) {
       if (!s.dead && dist(ship, s) < ship.radius + s.radius) {
-        killShip();
+        if (ship.shieldTime > 0) {
+          s.dead = true;
+          score += SHOOTING_POINTS;
+          explode(s.x, s.y, 12);
+        } else {
+          killShip();
+        }
         break;
       }
     }
+    shootingStars = shootingStars.filter(s => !s.dead);
   }
 
   // Nivel completado
@@ -574,6 +696,17 @@ function drawHUD() {
     ctx.fillRect(bx, by, bw, bh);
     ctx.fillStyle = '#ffcc00';
     ctx.fillRect(bx, by, bw * (ship.speedBoost / POWERUP_BOOST), bh);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bx, by, bw, bh);
+  }
+
+  if (ship.shieldTime > 0) {
+    const bx = 14, by = 46, bw = 120, bh = 8;
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.fillStyle = '#66ccff';
+    ctx.fillRect(bx, by, bw * (ship.shieldTime / SHIELD_DURATION), bh);
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 1;
     ctx.strokeRect(bx, by, bw, bh);
