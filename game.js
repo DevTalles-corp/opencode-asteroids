@@ -199,6 +199,7 @@ class Ship {
     this.shootCooldown = 0;
     this.dead          = false;
     this.speedBoost    = 0;   // timer del power-up de Velocidad
+    this.tripleShot    = 0;   // timer del power-up de Triple Shot
   }
 
   update(dt) {
@@ -206,6 +207,7 @@ class Ship {
     if (this.invincible    > 0) this.invincible    -= dt;
     if (this.shootCooldown > 0) this.shootCooldown -= dt;
     if (this.speedBoost    > 0) this.speedBoost    -= dt;
+    if (this.tripleShot    > 0) this.tripleShot    -= dt;
 
     const ROT   = 3.5;   // rad/s
     const THRUST = (this.speedBoost > 0 ? 520 : 260);  // px/s² (x2 con boost)
@@ -232,6 +234,13 @@ class Ship {
     const NOSE = 21;
     const ox = this.x + Math.cos(this.angle) * NOSE;
     const oy = this.y + Math.sin(this.angle) * NOSE;
+    if (this.tripleShot > 0) {
+      return [
+        new Bullet(ox, oy, this.angle),
+        new Bullet(ox, oy, this.angle - TRIPLE_SPREAD),
+        new Bullet(ox, oy, this.angle + TRIPLE_SPREAD),
+      ];
+    }
     return [new Bullet(ox, oy, this.angle)];
   }
 
@@ -251,6 +260,21 @@ class Ship {
     if (this.speedBoost > 0) {
       ctx.save();
       ctx.strokeStyle = 'rgba(255,204,0,0.6)';
+      ctx.lineWidth   = 3;
+      ctx.beginPath();
+      ctx.moveTo( 20,  0);
+      ctx.lineTo(-12, -9);
+      ctx.lineTo( -7,  0);
+      ctx.lineTo(-12,  9);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Halo de Triple Shot
+    if (this.tripleShot > 0) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(51,204,255,0.6)';
       ctx.lineWidth   = 3;
       ctx.beginPath();
       ctx.moveTo( 20,  0);
@@ -291,10 +315,14 @@ const POWERUP_BOOST  = 10;    // duración del boost al recogerlo
 const POWERUP_RADIUS = 12;
 const POWERUP_DROP   = 0.08;  // probabilidad de drop por asteroide destruido
 
+const TRIPLE_DURATION = 5;    // segundos activo
+const TRIPLE_SPREAD   = 0.17; // rad ≈ ±10°
+
 class PowerUp {
   constructor(x, y) {
     this.x = x;
     this.y = y;
+    this.type = Math.random() < 0.5 ? 'speed' : 'triple';
     this.radius = POWERUP_RADIUS;
     this.ttl  = POWERUP_TTL;
     this.rot  = 0;
@@ -313,11 +341,15 @@ class PowerUp {
     // Parpadeo en los últimos 2s
     if (this.ttl < 2 && Math.floor(this.ttl * 8) % 2 === 0) return;
 
+    const isTriple = this.type === 'triple';
+    const stroke = isTriple ? '#33ccff' : '#ffcc00';
+    const fill   = isTriple ? 'rgba(51,204,255,0.18)' : 'rgba(255,204,0,0.18)';
+
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.rot);
-    ctx.strokeStyle = '#ffcc00';
-    ctx.fillStyle   = 'rgba(255,204,0,0.18)';
+    ctx.strokeStyle = stroke;
+    ctx.fillStyle   = fill;
     ctx.lineWidth   = 1.5;
     ctx.lineJoin    = 'round';
 
@@ -334,20 +366,31 @@ class PowerUp {
     ctx.fill();
     ctx.stroke();
 
-    // Rayo ⚡ central (sin rotar para legibilidad)
+    // Icono central (sin rotar para legibilidad)
     ctx.rotate(-this.rot);
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth   = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(-3, -6);
-    ctx.lineTo( 1, -1);
-    ctx.lineTo(-1, -1);
-    ctx.lineTo( 3,  6);
-    ctx.lineTo(-1,  1);
-    ctx.lineTo( 1,  1);
-    ctx.closePath();
-    ctx.fillStyle = '#fff';
-    ctx.fill();
+    if (isTriple) {
+      // Tres puntos verticales = triple disparo
+      ctx.fillStyle = '#fff';
+      for (const dy of [-6, 0, 6]) {
+        ctx.beginPath();
+        ctx.arc(0, dy, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else {
+      // Rayo ⚡ central
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth   = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-3, -6);
+      ctx.lineTo( 1, -1);
+      ctx.lineTo(-1, -1);
+      ctx.lineTo( 3,  6);
+      ctx.lineTo(-1,  1);
+      ctx.lineTo( 1,  1);
+      ctx.closePath();
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+    }
     ctx.restore();
   }
 }
@@ -515,7 +558,8 @@ function update(dt) {
   for (const p of powerUps) {
     if (!p.dead && dist(ship, p) < ship.radius + p.radius) {
       p.dead = true;
-      ship.speedBoost = POWERUP_BOOST;   // refresca a 5s siempre
+      if (p.type === 'triple') ship.tripleShot = TRIPLE_DURATION;
+      else                     ship.speedBoost = POWERUP_BOOST;
     }
   }
 
@@ -574,6 +618,17 @@ function drawHUD() {
     ctx.fillRect(bx, by, bw, bh);
     ctx.fillStyle = '#ffcc00';
     ctx.fillRect(bx, by, bw * (ship.speedBoost / POWERUP_BOOST), bh);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bx, by, bw, bh);
+  }
+
+  if (ship.tripleShot > 0) {
+    const bx = 14, by = 46, bw = 120, bh = 8;
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.fillStyle = '#33ccff';
+    ctx.fillRect(bx, by, bw * (ship.tripleShot / TRIPLE_DURATION), bh);
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 1;
     ctx.strokeRect(bx, by, bw, bh);
