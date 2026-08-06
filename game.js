@@ -5,6 +5,54 @@ const ctx = canvas.getContext('2d');
 const W = 800;
 const H = 600;
 
+// ── Skins de nave ─────────────────────────────────────────────────────────────
+const SKINS = [
+  {
+    name: 'CLÁSICA',
+    hull: [[20, 0], [-12, -9], [-7, 0], [-12, 9]],
+    color: '#fff',
+    flame: 'rgba(255,130,0,0.85)',
+    flameW: 4,
+    flameLen: [6, 14],
+  },
+  {
+    name: 'CAZA',
+    hull: [[22, 0], [-12, -6], [-6, 0], [-12, 6]],
+    color: '#7af',
+    flame: 'rgba(120,200,255,0.85)',
+    flameW: 5,
+    flameLen: [8, 18],
+  },
+  {
+    name: 'ALIEN',
+    hull: [[15, -9], [18, 0], [15, 9], [-9, 6], [-15, 0], [-9, -6]],
+    color: '#9f9',
+    flame: 'rgba(120,255,150,0.85)',
+    flameW: 7,
+    flameLen: [5, 12],
+    aura: 'rgba(120,255,150,0.25)',
+  },
+  {
+    name: 'VETERANO',
+    hull: [[18, -2], [22, 0], [18, 2], [-6, 8], [-14, 4], [-8, 0], [-14, -4], [-6, -8]],
+    color: '#fa3',
+    flame: 'rgba(255,180,0,0.85)',
+    flameW: 6,
+    flameLen: [6, 14],
+    wings: [[-6, 8], [-16, 12], [-12, 2], [-6, -8], [-16, -12], [-12, -2]],
+  },
+];
+const DEFAULT_SKIN = 0;
+const SKIN_FLASH = 1.5;
+
+function loadSkin() {
+  const raw = parseInt(localStorage.getItem('asteroids.shipSkin') ?? '', 10);
+  return Number.isInteger(raw) && raw >= 0 && raw < SKINS.length ? raw : DEFAULT_SKIN;
+}
+function saveSkin(i) {
+  try { localStorage.setItem('asteroids.shipSkin', String(i)); } catch (_) {}
+}
+
 // ── Input ─────────────────────────────────────────────────────────────────────
 const keys = {};
 const justPressed = {};
@@ -185,7 +233,10 @@ class ShootingStar {
 
 // ── Ship ──────────────────────────────────────────────────────────────────────
 class Ship {
-  constructor() { this.reset(); }
+  constructor() {
+    this.skinIndex = loadSkin();
+    this.reset();
+  }
 
   reset() {
     this.x      = W / 2;
@@ -201,6 +252,13 @@ class Ship {
     this.speedBoost    = 0;   // timer del power-up de Velocidad
     this.shieldTime    = 0;   // timer del escudo
     this.tripleShot    = 0;   // timer del power-up de Triple Shot
+    this.skinFlash     = 0;   // feedback al cambiar de skin
+  }
+
+  cycleSkin(delta) {
+    this.skinIndex = (this.skinIndex + delta + SKINS.length) % SKINS.length;
+    saveSkin(this.skinIndex);
+    this.skinFlash = SKIN_FLASH;
   }
 
   update(dt) {
@@ -208,8 +266,12 @@ class Ship {
     if (this.invincible    > 0) this.invincible    -= dt;
     if (this.shootCooldown > 0) this.shootCooldown -= dt;
     if (this.speedBoost    > 0) this.speedBoost    -= dt;
-if (this.shieldTime    > 0) this.shieldTime    -= dt;
+    if (this.shieldTime    > 0) this.shieldTime    -= dt;
     if (this.tripleShot    > 0) this.tripleShot    -= dt;
+    if (this.skinFlash     > 0) this.skinFlash     -= dt;
+
+    if (pressed('KeyQ')) this.cycleSkin(+1);
+    if (pressed('KeyE')) this.cycleSkin(-1);
 
     const ROT   = 3.5;   // rad/s
     const THRUST = (this.speedBoost > 0 ? 520 : 260);  // px/s² (x2 con boost)
@@ -268,24 +330,21 @@ if (this.shieldTime    > 0) this.shieldTime    -= dt;
     // Parpadeo durante invencibilidad de reaparición
     if (this.invincible > 0 && Math.floor(this.invincible * 8) % 2 === 0) return;
 
+    const s = SKINS[this.skinIndex];
+
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
-    ctx.strokeStyle = '#fff';
+    ctx.strokeStyle = s.color;
     ctx.lineWidth   = 1.5;
     ctx.lineJoin    = 'round';
 
-    // Halo de Velocidad
+    // Halo de Velocidad (indicador del power-up, independiente de la skin)
     if (this.speedBoost > 0) {
       ctx.save();
       ctx.strokeStyle = 'rgba(255,204,0,0.6)';
       ctx.lineWidth   = 3;
-      ctx.beginPath();
-      ctx.moveTo( 20,  0);
-      ctx.lineTo(-12, -9);
-      ctx.lineTo( -7,  0);
-      ctx.lineTo(-12,  9);
-      ctx.closePath();
+      this._pathHull(s.hull);
       ctx.stroke();
       ctx.restore();
     }
@@ -295,36 +354,57 @@ if (this.shieldTime    > 0) this.shieldTime    -= dt;
       ctx.save();
       ctx.strokeStyle = 'rgba(51,204,255,0.6)';
       ctx.lineWidth   = 3;
-      ctx.beginPath();
-      ctx.moveTo( 20,  0);
-      ctx.lineTo(-12, -9);
-      ctx.lineTo( -7,  0);
-      ctx.lineTo(-12,  9);
-      ctx.closePath();
+      this._pathHull(s.hull);
       ctx.stroke();
       ctx.restore();
     }
 
-    // Silueta clásica: triángulo con muesca trasera
-    ctx.beginPath();
-    ctx.moveTo( 20,  0);   // nariz
-    ctx.lineTo(-12, -9);   // ala izquierda
-    ctx.lineTo( -7,  0);   // muesca trasera
-    ctx.lineTo(-12,  9);   // ala derecha
-    ctx.closePath();
+    // Aura pulsante (skin Alien)
+    if (s.aura) {
+      const pulse = 16 + Math.sin(performance.now() / 200) * 3;
+      ctx.save();
+      ctx.strokeStyle = s.aura;
+      ctx.lineWidth   = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, pulse, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Alas extra (skin Veterano)
+    if (s.wings) {
+      ctx.beginPath();
+      ctx.moveTo(s.wings[0][0], s.wings[0][1]);
+      for (let i = 1; i < s.wings.length; i++)
+        ctx.lineTo(s.wings[i][0], s.wings[i][1]);
+      ctx.closePath();
+      ctx.stroke();
+    }
+
+    // Casco principal
+    this._pathHull(s.hull);
     ctx.stroke();
 
     // Llama del propulsor
     if (this.thrusting && Math.random() > 0.35) {
+      const len = rand(s.flameLen[0], s.flameLen[1]);
       ctx.beginPath();
-      ctx.moveTo(-8, -4);
-      ctx.lineTo(-8 - rand(6, 14), 0);
-      ctx.lineTo(-8,  4);
-      ctx.strokeStyle = 'rgba(255, 130, 0, 0.85)';
+      ctx.moveTo(-s.flameW, -s.flameW);
+      ctx.lineTo(-8 - len, 0);
+      ctx.lineTo(-s.flameW,  s.flameW);
+      ctx.strokeStyle = s.flame;
       ctx.stroke();
     }
 
     ctx.restore();
+  }
+
+  _pathHull(hull) {
+    ctx.beginPath();
+    ctx.moveTo(hull[0][0], hull[0][1]);
+    for (let i = 1; i < hull.length; i++)
+      ctx.lineTo(hull[i][0], hull[i][1]);
+    ctx.closePath();
   }
 }
 
@@ -716,6 +796,15 @@ if (ship.shieldTime > 0) {
 
   for (let i = 0; i < lives; i++)
     drawLifeIcon(W - 16 - i * 22, 18);
+
+  // Flash de skin al cambiar (Q/E)
+  if (ship.skinFlash > 0) {
+    const alpha = Math.min(1, ship.skinFlash / SKIN_FLASH);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+    ctx.fillText(`NAVE: ${SKINS[ship.skinIndex].name}`, W / 2, H - 20);
+  }
 
 }
 
