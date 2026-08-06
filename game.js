@@ -41,6 +41,16 @@ const SKINS = [
     flameLen: [6, 14],
     wings: [[-6, 8], [-16, 12], [-12, 2], [-6, -8], [-16, -12], [-12, -2]],
   },
+  {
+    name: 'TITÁN MORADO',
+    hull: [[40, 0], [-24, -18], [-14, 0], [-24, 18]],
+    color: '#c066ff',
+    flame: 'rgba(220,120,255,0.85)',
+    flameW: 8,
+    flameLen: [12, 28],
+    scale: 2,        // 2× el tamaño de la nave clásica
+    scoreMult: 2,    // 2× puntos al usar esta nave
+  },
 ];
 const DEFAULT_SKIN = 0;
 const SKIN_FLASH = 1.5;
@@ -244,7 +254,7 @@ class Ship {
     this.angle  = -Math.PI / 2;
     this.vx     = 0;
     this.vy     = 0;
-    this.radius = 12;
+    this.radius = 12 * (SKINS[this.skinIndex].scale || 1);
     this.thrusting     = false;
     this.invincible    = 3;
     this.shootCooldown = 0;
@@ -258,6 +268,7 @@ class Ship {
   cycleSkin(delta) {
     this.skinIndex = (this.skinIndex + delta + SKINS.length) % SKINS.length;
     saveSkin(this.skinIndex);
+    this.radius = 12 * (SKINS[this.skinIndex].scale || 1);
     this.skinFlash = SKIN_FLASH;
   }
 
@@ -295,7 +306,7 @@ class Ship {
   tryShoot() {
     if (this.shootCooldown > 0 || this.dead) return [];
     this.shootCooldown = 0.2;
-    const NOSE = 21;
+    const NOSE = 21 * (SKINS[this.skinIndex].scale || 1);
     const ox = this.x + Math.cos(this.angle) * NOSE;
     const oy = this.y + Math.sin(this.angle) * NOSE;
     if (this.tripleShot > 0) {
@@ -659,7 +670,7 @@ function update(dt) {
       if (!a.dead && !b.dead && dist(b, a) < a.radius) {
         b.dead = true;
         a.dead = true;
-        score += POINTS[a.size];
+        score += POINTS[a.size] * (SKINS[ship.skinIndex].scoreMult || 1);
         explode(a.x, a.y, a.size * 5);
         newAsteroids.push(...a.split());
         maybeDropPowerUp(a.x, a.y);
@@ -675,7 +686,7 @@ function update(dt) {
       if (!s.dead && !b.dead && dist(b, s) < s.radius) {
         b.dead = true;
         s.dead = true;
-        score += SHOOTING_POINTS;
+        score += SHOOTING_POINTS * (SKINS[ship.skinIndex].scoreMult || 1);
         explode(s.x, s.y, 12);
       }
     }
@@ -699,7 +710,7 @@ function update(dt) {
       if (!a.dead && dist(ship, a) < ship.radius + a.radius * 0.82) {
         if (ship.shieldTime > 0) {
           a.dead = true;
-          score += POINTS[a.size];
+          score += POINTS[a.size] * (SKINS[ship.skinIndex].scoreMult || 1);
           explode(a.x, a.y, a.size * 5);
           maybeDropPowerUp(a.x, a.y);
           asteroids.push(...a.split());
@@ -718,7 +729,7 @@ function update(dt) {
       if (!s.dead && dist(ship, s) < ship.radius + s.radius) {
         if (ship.shieldTime > 0) {
           s.dead = true;
-          score += SHOOTING_POINTS;
+          score += SHOOTING_POINTS * (SKINS[ship.skinIndex].scoreMult || 1);
           explode(s.x, s.y, 12);
         } else {
           killShip();
