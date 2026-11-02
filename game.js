@@ -66,12 +66,22 @@ const SPEED_POWERUP_DROP_CHANCE = 0.15;
 const SPEED_POWERUP_DURATION    = 5;
 const SPEED_POWERUP_TTL         = 10;
 
+const SHOOTING_STAR_MIN_INTERVAL = 12;
+const SHOOTING_STAR_MAX_INTERVAL = 18;
+const SHOOTING_STAR_MIN_LIFE     = 5;
+const SHOOTING_STAR_MAX_LIFE     = 8;
+const SHOOTING_STAR_MIN_SPEED    = 220;
+const SHOOTING_STAR_MAX_SPEED    = 300;
+const SHOOTING_STAR_POINTS       = 150;
+
 class Asteroid {
   constructor(x, y, size = 3) {
     this.x    = x;
     this.y    = y;
     this.size = size;
     this.radius = RADII[size];
+    this.points = POINTS[size];
+    this.explodeCount = size * 5;
     this.dead = false;
 
     const angle = rand(0, Math.PI * 2);
@@ -112,6 +122,70 @@ class Asteroid {
     ctx.strokeStyle = '#fff';
     ctx.lineWidth   = 1.5;
     ctx.lineJoin    = 'round';
+    ctx.beginPath();
+    ctx.moveTo(this.verts[0][0], this.verts[0][1]);
+    for (let i = 1; i < this.verts.length; i++)
+      ctx.lineTo(this.verts[i][0], this.verts[i][1]);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// ── Estrella fugaz ────────────────────────────────────────────────────────────
+class ShootingStar extends Asteroid {
+  constructor(x, y, angle, speed) {
+    super(x, y, 1);
+    this.radius       = 14;
+    this.vx           = Math.cos(angle) * speed;
+    this.vy           = Math.sin(angle) * speed;
+    this.rotSpeed     = rand(2, 5);
+    this.points       = SHOOTING_STAR_POINTS;
+    this.explodeCount = 16;
+    this.life         = rand(SHOOTING_STAR_MIN_LIFE, SHOOTING_STAR_MAX_LIFE);
+    this.ttl          = this.life;
+  }
+
+  update(dt) {
+    super.update(dt);
+    this.ttl -= dt;
+    if (this.ttl <= 0) this.dead = true;
+  }
+
+  split() { return []; }
+
+  draw() {
+    if (this.dead) return;
+
+    const alpha = Math.min(1, this.ttl / 1.5);
+    const tail  = 55 + (1 - this.ttl / this.life) * 45;
+
+    // Estela degradada en dirección opuesta al movimiento
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(Math.atan2(this.vy, this.vx));
+    const grad = ctx.createLinearGradient(0, 0, -tail, 0);
+    grad.addColorStop(0, `rgba(255,190,80,${(alpha * 0.9).toFixed(2)})`);
+    grad.addColorStop(1, 'rgba(255,190,80,0)');
+    ctx.strokeStyle = grad;
+    ctx.lineWidth   = 3;
+    ctx.lineCap     = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-tail, 0);
+    ctx.stroke();
+    ctx.restore();
+
+    // Cuerpo irregular con brillo
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rot);
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = '#ffb347';
+    ctx.lineWidth   = 2;
+    ctx.lineJoin    = 'round';
+    ctx.shadowColor = '#ff8c42';
+    ctx.shadowBlur  = 12;
     ctx.beginPath();
     ctx.moveTo(this.verts[0][0], this.verts[0][1]);
     for (let i = 1; i < this.verts.length; i++)
@@ -290,7 +364,7 @@ class SpeedPowerUp {
 
 // ── Estado del juego ──────────────────────────────────────────────────────────
 let ship, bullets, asteroids, particles, powerups;
-let score, lives, level, speedTimer;
+let score, lives, level, speedTimer, shootingStarTimer;
 let state;      // 'playing' | 'dead' | 'gameover'
 let deadTimer;
 
@@ -306,6 +380,33 @@ function spawnAsteroids(count) {
   }
 }
 
+function spawnShootingStar() {
+  const MARGIN = 20;
+  const spread = Math.PI / 6;
+  const edge   = randInt(0, 3);
+  let x, y, angle;
+
+  if (edge === 0) {
+    x = MARGIN;
+    y = rand(0, H);
+    angle = rand(-spread, spread);
+  } else if (edge === 1) {
+    x = W - MARGIN;
+    y = rand(0, H);
+    angle = Math.PI + rand(-spread, spread);
+  } else if (edge === 2) {
+    x = rand(0, W);
+    y = MARGIN;
+    angle = Math.PI / 2 + rand(-spread, spread);
+  } else {
+    x = rand(0, W);
+    y = H - MARGIN;
+    angle = -Math.PI / 2 + rand(-spread, spread);
+  }
+
+  asteroids.push(new ShootingStar(x, y, angle, rand(SHOOTING_STAR_MIN_SPEED, SHOOTING_STAR_MAX_SPEED)));
+}
+
 function initGame() {
   ship       = new Ship();
   bullets    = [];
@@ -316,6 +417,7 @@ function initGame() {
   lives      = 3;
   level      = 1;
   speedTimer = 0;
+  shootingStarTimer = rand(SHOOTING_STAR_MIN_INTERVAL, SHOOTING_STAR_MAX_INTERVAL);
   state      = 'playing';
   spawnAsteroids(4);
 }
@@ -374,6 +476,14 @@ function update(dt) {
     bullets.push(...ship.tryShoot());
   }
 
+  // Estrella fugaz
+  shootingStarTimer -= dt;
+  if (shootingStarTimer <= 0) {
+    shootingStarTimer = rand(SHOOTING_STAR_MIN_INTERVAL, SHOOTING_STAR_MAX_INTERVAL);
+    if (!asteroids.some(a => a instanceof ShootingStar))
+      spawnShootingStar();
+  }
+
   ship.update(dt);
   bullets.forEach(b => b.update(dt));
   asteroids.forEach(a => a.update(dt));
@@ -393,8 +503,8 @@ function update(dt) {
       if (!a.dead && !b.dead && dist(b, a) < a.radius) {
         b.dead = true;
         a.dead = true;
-        score += POINTS[a.size];
-        explode(a.x, a.y, a.size * 5);
+        score += a.points;
+        explode(a.x, a.y, a.explodeCount);
         newAsteroids.push(...a.split());
         if (Math.random() < SPEED_POWERUP_DROP_CHANCE)
           powerups.push(new SpeedPowerUp(a.x, a.y));
@@ -423,8 +533,8 @@ function update(dt) {
     }
   }
 
-  // Nivel completado
-  if (asteroids.length === 0) nextLevel();
+  // Nivel completado (las estrellas fugaces no bloquean)
+  if (asteroids.every(a => a instanceof ShootingStar)) nextLevel();
 }
 
 // ── Draw ──────────────────────────────────────────────────────────────────────
