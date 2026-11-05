@@ -38,6 +38,10 @@ Luego visita `http://localhost:3000`.
 | Mediano   | 50     |
 | Pequeño   | 100    |
 
+## Power-ups
+
+- **Velocidad (`2X`)** — aparece al destruir asteroides (15% de probabilidad). Al recogerlo, la nave se mueve al doble de velocidad durante 5 segundos; el HUD muestra `VELOCIDAD x2` con el tiempo restante.
+
 ## Características
 
 - 3 vidas con invencibilidad temporal al reaparecer (parpadeo)
