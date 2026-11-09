@@ -61,6 +61,10 @@ class Bullet {
 const RADII  = [0, 16, 30, 50];   // por tamaño 1, 2, 3
 const SPEEDS = [0, 85, 55, 32];   // velocidad base por tamaño
 const POINTS = [0, 100, 50, 20];  // puntos por tamaño
+const SHOOTING_STAR_CHANCE = 0.2;
+const SHOOTING_STAR_TTL = 7;
+const SHOOTING_STAR_SPEED_MULTIPLIER = 2.2;
+const SHOOTING_STAR_POINTS = 150;
 
 class SpeedPowerUp {
   constructor(x, y) {
@@ -97,15 +101,20 @@ class SpeedPowerUp {
 }
 
 class Asteroid {
-  constructor(x, y, size = 3) {
+  constructor(x, y, size = 3, isShootingStar = false) {
     this.x    = x;
     this.y    = y;
     this.size = size;
     this.radius = RADII[size];
+    this.isShootingStar = isShootingStar;
+    this.ttl = isShootingStar ? SHOOTING_STAR_TTL : null;
     this.dead = false;
 
     const angle = rand(0, Math.PI * 2);
-    const speed = SPEEDS[size] + rand(-15, 15);
+    const baseSpeed = SPEEDS[size] + rand(-15, 15);
+    const speed = isShootingStar
+      ? baseSpeed * SHOOTING_STAR_SPEED_MULTIPLIER
+      : baseSpeed;
     this.vx = Math.cos(angle) * speed;
     this.vy = Math.sin(angle) * speed;
     this.rotSpeed = rand(-1.2, 1.2);
@@ -125,6 +134,10 @@ class Asteroid {
     this.x   = wrap(this.x + this.vx * dt, W);
     this.y   = wrap(this.y + this.vy * dt, H);
     this.rot += this.rotSpeed * dt;
+    if (this.isShootingStar) {
+      this.ttl -= dt;
+      if (this.ttl <= 0) this.dead = true;
+    }
   }
 
   split() {
@@ -139,7 +152,15 @@ class Asteroid {
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.rot);
-    ctx.strokeStyle = '#fff';
+    if (this.isShootingStar) {
+      ctx.strokeStyle = '#ffb000';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-this.vx * 0.12, -this.vy * 0.12);
+      ctx.lineTo(-this.vx * 0.035, -this.vy * 0.035);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = this.isShootingStar ? '#ffb000' : '#fff';
     ctx.lineWidth   = 1.5;
     ctx.lineJoin    = 'round';
     ctx.beginPath();
@@ -287,7 +308,8 @@ function spawnAsteroids(count) {
       x = rand(0, W);
       y = rand(0, H);
     } while (Math.hypot(x - W / 2, y - H / 2) < SAFE_DIST);
-    asteroids.push(new Asteroid(x, y, 3));
+    const isShootingStar = Math.random() < SHOOTING_STAR_CHANCE;
+    asteroids.push(new Asteroid(x, y, isShootingStar ? 2 : 3, isShootingStar));
   }
 }
 
@@ -381,7 +403,7 @@ function update(dt) {
       if (!a.dead && !b.dead && dist(b, a) < a.radius) {
         b.dead = true;
         a.dead = true;
-        score += POINTS[a.size];
+        score += a.isShootingStar ? SHOOTING_STAR_POINTS : POINTS[a.size];
         explode(a.x, a.y, a.size * 5);
         newAsteroids.push(...a.split());
       }
